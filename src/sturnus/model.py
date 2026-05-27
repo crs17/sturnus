@@ -91,3 +91,16 @@ class LayerNorm(torch.nn.Module):
         norm_x = (x - mean) / torch.sqrt(var + self.eps)
         return self.scale * norm_x + self.shift
 
+
+class FeedForward(torch.nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.layers = torch.nn.Sequential(
+            torch.nn.Linear(config['embed_dim'], 4 * config['embed_dim']),
+            torch.nn.GELU(approximate='tanh'),
+            torch.nn.Linear(4 * config['embed_dim'], config['embed_dim']),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.layers(x)
+        
