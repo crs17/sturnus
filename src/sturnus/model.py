@@ -103,4 +103,30 @@ class FeedForward(torch.nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.layers(x)
-        
+
+
+class ShortcutExampleNN(torch.nn.Module):
+    def __init__(self, count_layers: int, use_shortcut: bool):
+        super().__init__()
+        self.use_shortcut = use_shortcut
+        self.layers = torch.nn.ModuleList(
+            [
+                torch.nn.Sequential(
+                    torch.nn.Linear(
+                        1 if i == 0 else 5,
+                        1 if i == count_layers -1 else 5
+                    ),
+                    torch.nn.GELU(approximate='tanh')
+                )
+                for i in range(count_layers)
+            ]            
+        )
+
+    def forward(self, x: torch.tensor) -> torch.tensor:
+        for layer in self.layers:
+            if self.use_shortcut:
+                x = x + layer(x)
+            else:
+                x = layer(x)
+        return x
+    
