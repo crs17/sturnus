@@ -165,4 +165,35 @@ class TransformerBlock(torch.nn.Module):
         x = x + shortcut
 
         return x    
+
+
+class GPTModel(torch.nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.tok_emb = torch.nn.Embedding(config['vocab_size'], config['embed_dim'])
+        self.pos_emb = torch.nn.Embedding(config['block_size'], config['embed_dim'])
+
+        self.drop_emb = torch.nn.Dropout(config['dropout'])
+
+        self.trf_blocks = torch.nn.Sequential(
+            *[TransformerBlock(config) for _ in range(config['count_blocks'])]
+        )
+
+        self.final_norm = LayerNorm(config['embed_dim'])
+        self.out_head = torch.nn.Linear(
+            config['embed_dim'], config['vocab_size'], bias=False
+        )
         
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        batch_size, seq_len = x.shape
+        tok_embeds = self.tok_emb(x)
+
+        pos_embeds = self.pos_emb(torch.arange(seq_len, device=x.device))
+
+        x = tok_embeds + pos_embeds
+        x = self.drop_emb(x)
+        x = self.trf_blocks(x)
+        x = self.final_norm(x)
+        logits = self.out_head(x)
+
+        return logits
