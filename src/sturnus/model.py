@@ -26,17 +26,17 @@ class MultiHeadAttention(torch.nn.Module):
         self.head_count = head_count
         self.d_out_per_head = d_out // head_count
 
-        self.W_Q = torch.nn.Linear(d_in, d_out, bias=qkv_bias)
-        self.W_K = torch.nn.Linear(d_in, d_out, bias=qkv_bias)
-        self.W_V = torch.nn.Linear(d_in, d_out, bias=qkv_bias)
+        self.W_Q = torch.nn.Linear(d_in, d_out, bias=qkv_bias)  # [O, I]
+        self.W_K = torch.nn.Linear(d_in, d_out, bias=qkv_bias)  # [O, I]
+        self.W_V = torch.nn.Linear(d_in, d_out, bias=qkv_bias)  # [O, I]
         
-        self.out_projection = torch.nn.Linear(d_out, d_out)
+        self.out_projection = torch.nn.Linear(d_out, d_out)  # [O, O]
         self.dropout = torch.nn.Dropout(dropout_rate)
         self.register_buffer(
             'mask',
             torch.triu(torch.ones(context_length, context_length),
             diagonal=1).bool()
-        )
+        )  # [C, C]
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         batch_size, count_tokens, d_in = x.shape
@@ -76,5 +76,18 @@ class MultiHeadAttention(torch.nn.Module):
 
         return context_vectors
         
-        
-        
+
+
+class LayerNorm(torch.nn.Module):
+    def __init__(self, emb_dim: int):
+        super().__init__()
+        self.eps = 1e-5
+        self.scale = torch.nn.Parameter(torch.ones(emb_dim))
+        self.shift = torch.nn.Parameter(torch.zeros(emb_dim))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        mean = x.mean(dim=-1, keepdim=True)
+        var = x.var(dim=-1, keepdim=True, unbiased=False)
+        norm_x = (x - mean) / torch.sqrt(var + self.eps)
+        return self.scale * norm_x + self.shift
+
