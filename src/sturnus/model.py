@@ -130,3 +130,39 @@ class ShortcutExampleNN(torch.nn.Module):
                 x = layer(x)
         return x
     
+
+class TransformerBlock(torch.nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.att = MultiHeadAttention(
+            d_in=config['embed_dim'],
+            d_out=config['embed_dim'],
+            context_length=config['block_size'],
+            head_count=config['count_heads'],   
+            dropout_rate=config['dropout'],
+            qkv_bias=config['qkv_bias']
+        )
+        self.ln1 = LayerNorm(config['embed_dim'])
+        self.ffn = FeedForward(config)
+        self.ln2 = LayerNorm(config['embed_dim'])
+        self.dropout = torch.nn.Dropout(config['dropout'])
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Attention block
+        # Identifies and analyses relationships between tokens
+        shortcut = x
+        x = self.ln1(x)
+        x = self.att(x)
+        x = self.dropout(x)
+        x = x + shortcut
+
+        # Feed-forward block
+        # Modifies tokens individually
+        shortcut = x
+        x = self.ln2(x)
+        x = self.ffn(x)
+        x = self.dropout(x)
+        x = x + shortcut
+
+        return x    
+        
