@@ -2,12 +2,13 @@ import torch
 
 # In order to keep track of the dimensions of each array, 
 # we use the following one-letter abbreviations:
+
 # I self attention block input size
 # O self attention block output size
 # B batch size
 # C context length
-
-# In coments after each array, we write the dimensions of the array.
+# H Head count
+# P output size per head
 
 class MultiHeadAttention(torch.nn.Module):
     def __init__(
@@ -39,40 +40,71 @@ class MultiHeadAttention(torch.nn.Module):
         )  # [C, C]
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        batch_size, count_tokens, d_in = x.shape
+        
+        print('In forward')
+        batch_size, count_tokens, d_in = x.shape  # [B, C, I]
 
-        q = self.W_Q(x)  # [batch_size, count_tokens, d_out]
-        k = self.W_K(x)  # [batch_size, count_tokens, d_out]
-        v = self.W_V(x)  # [batch_size, count_tokens, d_out]
+        print('B', batch_size)
+        print('C', count_tokens)
+        print('I', d_in)
+        print('O', self.d_out)
+        print('H', self.head_count)
+        print('P', self.d_out_per_head)
 
+        print('x', x.shape)
+        # [B, C, I] @ [O, I].T = [B, C, O]
+        q = self.W_Q(x)  # [B, C, O]
+        k = self.W_K(x)  # [B, C, O]
+        v = self.W_V(x)  # [B, C, O]
+
+        print('q', q.shape)
+        print('k', k.shape)
+        print('v', v.shape)
+
+        # [B, C, H, P]
         head_view = (batch_size, count_tokens, self.head_count, self.d_out_per_head)
-        q = q.view(head_view)
-        k = k.view(head_view)
-        v = v.view(head_view)
+        
+        q = q.view(head_view)  # [B, C, H, P]
+        k = k.view(head_view)  # [B, C, H, P]
+        v = v.view(head_view)  # [B, C, H, P]
 
-        q = q.transpose(1, 2)  # [batch_size, head_count, count_tokens, d_out_per_head]
-        k = k.transpose(1, 2)  # [batch_size, head_count, count_tokens, d_out_per_head]
-        v = v.transpose(1, 2)  # [batch_size, head_count, count_tokens, d_out_per_head]
+        print('q reshaped', q.shape)
+        print('k reshaped', k.shape)
+        print('v reshaped', v.shape)
 
-        attention_scores = q @ k.transpose(2, 3)  # [batch_size, head_count, count_tokens, d_out_per_head] @ [batch_size, head_count, d_out_per_head, count_tokens] = [batch_size, head_count, count_tokens, count_tokens]
-        # print('attention_scores', attention_scores.shape)
+        # Here we transpose the second and third dimensions, 
+        # swapping the context length for the head count
+        q = q.transpose(1, 2)  # [B, H, C, P]
+        k = k.transpose(1, 2)  # [B, H, C, P]
+        v = v.transpose(1, 2)  # [B, H, C, P]
 
-        mask = self.mask[:count_tokens, :count_tokens]  # [count_tokens, count_tokens]
+        print('q transposed', q.shape)
+        print('k transposed', k.shape)
+        print('v transposed', v.shape)
+
+        # [B, H, C, P] @ [B, H, P, C] = [B, H, C, C]
+        attention_scores = q @ k.transpose(2, 3) 
+        print('attention_scores', attention_scores.shape)
+
+        mask = self.mask[:count_tokens, :count_tokens]  # [C, C]
+        print('mask', mask)
         attention_scores.masked_fill_(mask, float('-inf'))
-        # print('attention_scores', attention_scores.shape)
 
         attention_weights = torch.softmax(attention_scores / self.d_out_per_head ** 0.5, dim=-1)
         attention_weights = self.dropout(attention_weights)
-        # print('attention_weights', attention_weights.shape)
+        print('attention_weights', attention_weights.shape)
 
-        context_vectors = (attention_weights @ v).transpose(1, 2)  # [batch_size, head_count, count_tokens, count_tokens] @ [batch_size, head_count, count_tokens, d_out_per_head] = [batch_size, head_count, count_tokens, d_out_per_head]
-        # print('context_vectors', context_vectors.shape)
+        # ([B, H, C, C] @ [B, H, C, P]).T(1,2) = [B, C, H, P]
+        context_vectors = (attention_weights @ v).transpose(1, 2) 
+        print('context_vectors', context_vectors.shape)
 
-        context_vectors = context_vectors.contiguous().view(batch_size, count_tokens, self.d_out)  # [batch_size, head_count, count_tokens, d_out_per_head] = [batch_size, count_tokens, d_out]
-        # print('context_vectors (after contiguous)', context_vectors.shape)
+        # [B, C, O] = [B, C, H, P].contiguous().view(B, C, O)
+        context_vectors = context_vectors.contiguous().view(batch_size, count_tokens, self.d_out)
+        print('context_vectors (after contiguous)', context_vectors.shape)
 
-        context_vectors = self.out_projection(context_vectors)  # [batch_size, count_tokens, d_out]
-        # print('context_vectors (after out_projection)', context_vectors.shape)
+        # [B, C, O] @ [O, O] = [B, C, O]
+        context_vectors = self.out_projection(context_vectors)
+        print('context_vectors (after out_projection)', context_vectors.shape)
 
         return context_vectors
         
