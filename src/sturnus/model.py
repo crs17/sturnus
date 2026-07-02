@@ -1,16 +1,23 @@
 import torch
 
+# This file contains the implementation of the GPT model. I have tried to supply
+# plenty of comments to make the code easier to understand.
+
 # In order to keep track of the dimensions of each array, 
 # we use the following one-letter abbreviations:
+# I   self attention block input size
+# O   self attention block output size
+# B   batch size
+# C   context length
+# H   Head count
+# P   output size per head
 
-# I self attention block input size
-# O self attention block output size
-# B batch size
-# C context length
-# H Head count
-# P output size per head
 
 class MultiHeadAttention(torch.nn.Module):
+    """
+    Multi-head attention block. This is the main building block of the GPT model.
+    It is used to compute the attention between the tokens in the context.
+    """
     def __init__(
         self,
         d_in: int,
@@ -22,17 +29,29 @@ class MultiHeadAttention(torch.nn.Module):
     ):
         super().__init__()
 
+        # This class implements <head_count> parallel attention heads. 
+        # The output dimension <d_out> is divided equally among the heads.
+        # We must therefore first ensure that the output size is divisible by
+        # the number of heads.
         assert (d_out % head_count) == 0, "d_out must be divisible by head_count"
         self.d_out = d_out
         self.head_count = head_count
         self.d_out_per_head = d_out // head_count
 
+        # Next we instatiate the trainable parameters for the query, key
+        # and value matrices.
         self.W_Q = torch.nn.Linear(d_in, d_out, bias=qkv_bias)  # [O, I]
         self.W_K = torch.nn.Linear(d_in, d_out, bias=qkv_bias)  # [O, I]
         self.W_V = torch.nn.Linear(d_in, d_out, bias=qkv_bias)  # [O, I]
         
+        # The final output projection layer and dropout layer are also instantiated.
         self.out_projection = torch.nn.Linear(d_out, d_out)  # [O, O]
         self.dropout = torch.nn.Dropout(dropout_rate)
+
+        # We also register the mask buffer. This is a triangular matrix of ones
+        # above the diagonal and zeros at and below the diagonal.
+        # This is used to prevent the model from attending to tokens that are
+        # later in the context.
         self.register_buffer(
             'mask',
             torch.triu(torch.ones(context_length, context_length),
@@ -52,6 +71,9 @@ class MultiHeadAttention(torch.nn.Module):
         print('P', self.d_out_per_head)
 
         print('x', x.shape)
+        # Here we project the input tokens into the query, key and value spaces.
+        # Note that the resulting query, key and value matrices are shared across the
+        # heads with each head using separate slices.
         # [B, C, I] @ [O, I].T = [B, C, O]
         q = self.W_Q(x)  # [B, C, O]
         k = self.W_K(x)  # [B, C, O]
@@ -60,10 +82,12 @@ class MultiHeadAttention(torch.nn.Module):
         print('q', q.shape)
         print('k', k.shape)
         print('v', v.shape)
-
+        
+        # Next we reshape the query, key and value matrices to separate slices
+        # for each head. Note that the last dimension which was of size <O> is 
+        # now split into <H> splits with size <P>.
         # [B, C, H, P]
         head_view = (batch_size, count_tokens, self.head_count, self.d_out_per_head)
-        
         q = q.view(head_view)  # [B, C, H, P]
         k = k.view(head_view)  # [B, C, H, P]
         v = v.view(head_view)  # [B, C, H, P]
@@ -73,7 +97,8 @@ class MultiHeadAttention(torch.nn.Module):
         print('v reshaped', v.shape)
 
         # Here we transpose the second and third dimensions, 
-        # swapping the context length for the head count
+        # swapping the context length for the head count. This enables us 
+        # to perform the matrix multiplication per head in parallel.
         q = q.transpose(1, 2)  # [B, H, C, P]
         k = k.transpose(1, 2)  # [B, H, C, P]
         v = v.transpose(1, 2)  # [B, H, C, P]
@@ -82,26 +107,43 @@ class MultiHeadAttention(torch.nn.Module):
         print('k transposed', k.shape)
         print('v transposed', v.shape)
 
-        # [B, H, C, P] @ [B, H, P, C] = [B, H, C, C]
+        # Now we can compute the attention scores for each head in parallel.
+        # [B, H, C, P] @ [B, H, C, P].T(2,3) = [B, H, C, C]
         attention_scores = q @ k.transpose(2, 3) 
         print('attention_scores', attention_scores.shape)
 
+        # Next we apply the mask to the attention scores. This is used to prevent
+        # the model from attending to tokens that are later in the context.
+        # We fill the masked positions with negative infinity. The softmax function
+        # will then set the weights of the masked positions to zero.
         mask = self.mask[:count_tokens, :count_tokens]  # [C, C]
         print('mask', mask)
         attention_scores.masked_fill_(mask, float('-inf'))
+        print('attention_scores (after mask)', attention_scores)
 
-        attention_weights = torch.softmax(attention_scores / self.d_out_per_head ** 0.5, dim=-1)
+        # Next we apply the softmax function to the attention scores. This
+        # normalizes the scores to a probability distribution. The division by the
+        # square root of the output size per head helps with numerical stability.
+        attention_weights = torch.softmax(
+            attention_scores / self.d_out_per_head ** 0.5, dim=-1
+        )
+        # Finally we apply the dropout layer to the attention weights.
         attention_weights = self.dropout(attention_weights)
         print('attention_weights', attention_weights.shape)
 
+        # Here we compute the context vectors by coing a matrix multiplication between
+        # th attention weights and the value vectors. The context vectors are then reshaped
+        # to the "per head" shape.
         # ([B, H, C, C] @ [B, H, C, P]).T(1,2) = [B, C, H, P]
         context_vectors = (attention_weights @ v).transpose(1, 2) 
         print('context_vectors', context_vectors.shape)
 
-        # [B, C, O] = [B, C, H, P].contiguous().view(B, C, O)
+        # The "per head" dimensions are now concatenated back into the original shape.
+        # [B, C, H, P].contiguous().view(B, C, O) = [B, C, O]
         context_vectors = context_vectors.contiguous().view(batch_size, count_tokens, self.d_out)
         print('context_vectors (after contiguous)', context_vectors.shape)
 
+        # Finally we appy the additional output projection.
         # [B, C, O] @ [O, O] = [B, C, O]
         context_vectors = self.out_projection(context_vectors)
         print('context_vectors (after out_projection)', context_vectors.shape)
@@ -136,32 +178,6 @@ class FeedForward(torch.nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.layers(x)
 
-
-class ShortcutExampleNN(torch.nn.Module):
-    def __init__(self, count_layers: int, use_shortcut: bool):
-        super().__init__()
-        self.use_shortcut = use_shortcut
-        self.layers = torch.nn.ModuleList(
-            [
-                torch.nn.Sequential(
-                    torch.nn.Linear(
-                        1 if i == 0 else 5,
-                        1 if i == count_layers -1 else 5
-                    ),
-                    torch.nn.GELU(approximate='tanh')
-                )
-                for i in range(count_layers)
-            ]            
-        )
-
-    def forward(self, x: torch.tensor) -> torch.tensor:
-        for layer in self.layers:
-            if self.use_shortcut:
-                x = x + layer(x)
-            else:
-                x = layer(x)
-        return x
-    
 
 class TransformerBlock(torch.nn.Module):
     def __init__(self, config):
