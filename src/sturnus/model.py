@@ -60,17 +60,8 @@ class MultiHeadAttention(torch.nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         
-        print('In forward')
         batch_size, count_tokens, d_in = x.shape  # [B, C, I]
 
-        print('B', batch_size)
-        print('C', count_tokens)
-        print('I', d_in)
-        print('O', self.d_out)
-        print('H', self.head_count)
-        print('P', self.d_out_per_head)
-
-        print('x', x.shape)
         # Here we project the input tokens into the query, key and value spaces.
         # Note that the resulting query, key and value matrices are shared across the
         # heads with each head using separate slices.
@@ -79,10 +70,6 @@ class MultiHeadAttention(torch.nn.Module):
         k = self.W_K(x)  # [B, C, O]
         v = self.W_V(x)  # [B, C, O]
 
-        print('q', q.shape)
-        print('k', k.shape)
-        print('v', v.shape)
-        
         # Next we reshape the query, key and value matrices to separate slices
         # for each head. Note that the last dimension which was of size <O> is 
         # now split into <H> splits with size <P>.
@@ -92,10 +79,6 @@ class MultiHeadAttention(torch.nn.Module):
         k = k.view(head_view)  # [B, C, H, P]
         v = v.view(head_view)  # [B, C, H, P]
 
-        print('q reshaped', q.shape)
-        print('k reshaped', k.shape)
-        print('v reshaped', v.shape)
-
         # Here we transpose the second and third dimensions, 
         # swapping the context length for the head count. This enables us 
         # to perform the matrix multiplication per head in parallel.
@@ -103,50 +86,39 @@ class MultiHeadAttention(torch.nn.Module):
         k = k.transpose(1, 2)  # [B, H, C, P]
         v = v.transpose(1, 2)  # [B, H, C, P]
 
-        print('q transposed', q.shape)
-        print('k transposed', k.shape)
-        print('v transposed', v.shape)
-
         # Now we can compute the attention scores for each head in parallel.
         # [B, H, C, P] @ [B, H, C, P].T(2,3) = [B, H, C, C]
         attention_scores = q @ k.transpose(2, 3) 
-        print('attention_scores', attention_scores.shape)
 
         # Next we apply the mask to the attention scores. This is used to prevent
         # the model from attending to tokens that are later in the context.
         # We fill the masked positions with negative infinity. The softmax function
         # will then set the weights of the masked positions to zero.
         mask = self.mask[:count_tokens, :count_tokens]  # [C, C]
-        print('mask', mask)
         attention_scores.masked_fill_(mask, float('-inf'))
-        print('attention_scores (after mask)', attention_scores)
 
         # Next we apply the softmax function to the attention scores. This
-        # normalizes the scores to a probability distribution. The division by the
+        # normalizes the scores to a sum of 1. The division by the
         # square root of the output size per head helps with numerical stability.
         attention_weights = torch.softmax(
             attention_scores / self.d_out_per_head ** 0.5, dim=-1
         )
         # Finally we apply the dropout layer to the attention weights.
         attention_weights = self.dropout(attention_weights)
-        print('attention_weights', attention_weights.shape)
 
         # Here we compute the context vectors by coing a matrix multiplication between
         # th attention weights and the value vectors. The context vectors are then reshaped
         # to the "per head" shape.
         # ([B, H, C, C] @ [B, H, C, P]).T(1,2) = [B, C, H, P]
         context_vectors = (attention_weights @ v).transpose(1, 2) 
-        print('context_vectors', context_vectors.shape)
 
         # The "per head" dimensions are now concatenated back into the original shape.
         # [B, C, H, P].contiguous().view(B, C, O) = [B, C, O]
         context_vectors = context_vectors.contiguous().view(batch_size, count_tokens, self.d_out)
-        print('context_vectors (after contiguous)', context_vectors.shape)
 
         # Finally we appy the additional output projection.
         # [B, C, O] @ [O, O] = [B, C, O]
         context_vectors = self.out_projection(context_vectors)
-        print('context_vectors (after out_projection)', context_vectors.shape)
 
         return context_vectors
         
