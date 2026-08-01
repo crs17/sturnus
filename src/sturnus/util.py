@@ -36,4 +36,46 @@ def make_data_loader(text, batch_size, length_max, stride, shuffle=True, drop_la
         drop_last=drop_last,
         num_workers=worker_count
     )
-       
+
+
+def generate(
+    model,
+    idx,
+    max_new_tokens,
+    context_size,
+    temperature=0.0,
+    top_k=None,
+    eos_id=None
+    ):
+
+    for _ in range(max_new_tokens):
+        idx_cond = idx[:, -context_size:]
+        with torch.no_grad():
+            logits = model(idx_cond)
+        logits = logits[:, -1, :]
+        # In order to prevent the model from generating gibberish,
+        # we can use the top_k parameter to ensure that only the most
+        # likely tokens are considered even when temperature is increased.
+        if top_k is not None:
+            top_logits, _ = torch.topk(logits, top_k)
+            min_value = top_logits[:, -1]
+            logits = torch.where(
+                logits < min_value,
+                torch.tensor(-float('inf')),
+                logits
+            )
+        # If temperature is greater than 0, we will scale the logits by the temperature.
+        # Temperatures less than 1 lead to more deterministic output, while temperatures
+        # greater than 1 lead to more variable or "creative" output.
+        if temperature > 0.0:
+            logits = logits / temperature
+            probabilities = torch.softmax(logits, dim=-1)
+            idx_next = torch.multinomial(probabilities, num_samples=1)
+        else:
+            idx_next = torch.argmax(logits, dim=-1, keepdim=True)
+        if idx_next == eos_id:
+            break
+
+        idx = torch.cat((idx, idx_next), dim=1)
+
+    return idx
