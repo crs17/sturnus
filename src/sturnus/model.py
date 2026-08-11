@@ -177,7 +177,7 @@ class TransformerBlock(torch.nn.Module):
         x = x + shortcut
 
         # Feed-forward block
-        # Modifies tokens individually
+        # Modifies tokens individually - no information is shared between tokens
         shortcut = x
         x = self.ln2(x)
         x = self.ffn(x)
