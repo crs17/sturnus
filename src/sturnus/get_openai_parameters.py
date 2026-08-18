@@ -2,9 +2,9 @@ import numpy as np
 from transformers import GPT2LMHeadModel
 
 
-def fetch_gpt2_from_huggingface():
+def fetch_gpt2_from_huggingface(model="gpt2"):
   # Fetch the official OpenAI weights via Hugging Face
-  hf_model = GPT2LMHeadModel.from_pretrained("gpt2")
+  hf_model = GPT2LMHeadModel.from_pretrained(model)
   openai_state_dict = hf_model.state_dict()
 
   return openai_state_dict
