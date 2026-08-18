@@ -13,4 +13,5 @@ wheels/
 .DS_store
 
 # Fine-tuning notebook
-spam
+notebooks/spam
+notebooks/instruction
