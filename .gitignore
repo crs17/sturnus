@@ -12,6 +12,9 @@ wheels/
 # OSX
 .DS_store
 
+# Secrets
+.env
+
 # Fine-tuning notebook
 notebooks/spam
 notebooks/instruction
