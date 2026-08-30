@@ -1,1 +1,1 @@
-from gtp2 import GPT2Model
+from sturnus.models.gpt2 import GPTModel
