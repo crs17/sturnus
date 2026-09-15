@@ -1,0 +1,8 @@
+project:
+  type: default
+  output-dir: demos 
+  render:
+    - "notebooks/*.py"
+format:
+  gfm:
+    clean: true
