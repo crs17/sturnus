@@ -2,8 +2,7 @@
 
 
 title: “Grouped-query Attention” author: “Chresten R. Søndergaard”
-format: gfm \# Tells Quarto to output GitHub-Flavored Markdown jupyter:
-python3 —
+format: gfm: clean: true jupyter: python3 —
 
 ## Introduction
 
@@ -15,4 +14,10 @@ plt.plot([1, 2, 3], [4, 5, 6])
 plt.show()
 ```
 
-![](Grouped-query_attention_files/figure-commonmark/cell-2-output-1.png)
+<div id="fig-gqa-attention-weights">
+
+![](Grouped-query_attention_files/figure-commonmark/fig-gqa-attention-weights-output-1.png)
+
+Figure 1: Visualization of Grouped-query Attention weights.
+
+</div>
