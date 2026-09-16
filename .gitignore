@@ -15,6 +15,11 @@ wheels/
 # Secrets
 .env
 
-# Fine-tuning notebook
+# Notebooks
+notebooks/*.ipynb
 notebooks/spam
 notebooks/instruction
+
+# Quarto
+/.quarto/
+**/*.quarto_ipynb
