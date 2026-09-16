@@ -87,6 +87,10 @@ attention_scores_ = calculate_attention_scores(q_, k_)
 
 # %%
 
+#| label: fig-attention-scores
+#| fig-cap: "Visualization of attention score with and without RoPE."
+
+
 import matplotlib.colorizer as mcolorizer
 import matplotlib.colors as mcolors
 
