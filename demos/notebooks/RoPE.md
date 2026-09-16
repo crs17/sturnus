@@ -146,7 +146,13 @@ fig.suptitle('Attention Scores', y=0.9)
 fig.colorbar(s, ax=axs, orientation='horizontal', fraction=.1, label='Attention score')
 ```
 
-![](RoPE_files/figure-commonmark/cell-5-output-1.png)
+<div id="fig-attention-scores">
+
+![](RoPE_files/figure-commonmark/fig-attention-scores-output-1.png)
+
+Figure 1: Visualization of attention score with and without RoPE.
+
+</div>
 
 When plotting up the attention scores calculated from `q` and `k`
 tensors without positional embedding (left had side), we only see random
