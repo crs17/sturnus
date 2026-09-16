@@ -85,9 +85,8 @@ class GroupQueryAttention(torch.nn.Module):
         v = self.W_V(x)  # [B, C, R]
 
         # Next we reshape the query, key and value matrices to separate slices
-        # for each head. Note that the last dimension which was of size <O> is 
-        # now split into <H> splits with size <P>.
-        # [B, C, H, P]
+        # for each head. Note that the last dimension which was of size O or R is 
+        # now split into Q or K splits with size P.
         head_view_q = (batch_size, count_tokens, self.query_head_count, self.d_out_per_head)
         q = q.view(head_view_q)  # [B, C, Q, P]
         head_view_kv = (batch_size, count_tokens, self.kv_head_count, self.d_out_per_head)
@@ -136,7 +135,7 @@ class GroupQueryAttention(torch.nn.Module):
         context_vectors = context_vectors.contiguous().view(batch_size, count_tokens, self.d_out)
 
         # Finally we apply the additional output projection.
-        # [B, C, O] @ [O, O] = [B, C, O]
+        # [B, C, O] @ [O, O].T = [B, C, O]
         context_vectors = self.out_projection(context_vectors)
 
         return context_vectors
