@@ -23,7 +23,7 @@ import tiktoken
 import torch
 from torch.utils.data import Dataset, DataLoader
 
-from sturnus.model import GPTModel
+from sturnus.models import GPTModel
 from sturnus.util import generate, text_to_tokens, tokens_to_text
 
 
@@ -394,6 +394,3 @@ check_if_spam(
 
 # %% [markdown]
 # Success! The model seems to be fairly good at differenciating between spam and not spam messages. 
-
-# %% [markdown]
-#
