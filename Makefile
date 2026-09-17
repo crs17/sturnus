@@ -1,3 +1,2 @@
 quarto:
-	rm -rf demos
-	uv run quarto render 
+	uv run python scripts/render_demos.py
