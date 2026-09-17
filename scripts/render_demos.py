@@ -7,7 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 print('ROOT', ROOT)
 NOTEBOOKS_DIR = ROOT / "notebooks"
-OUTPUT_DIR = ROOT / "demos" / "notebooks"
+OUTPUT_DIR = ROOT / "demos"
 
 
 def needs_render(py_file: Path, md_file: Path) -> bool:
