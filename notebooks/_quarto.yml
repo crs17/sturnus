@@ -1,8 +1,8 @@
 project:
   type: default
-  output-dir: demos 
+  output-dir: ../demos 
   render:
-    - "notebooks/*.py"
+    - "*.py"
 format:
   gfm:
     clean: true
