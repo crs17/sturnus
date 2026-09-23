@@ -1,5 +1,4 @@
-import numpy as np
-from transformers import GPT2LMHeadModel
+from transformers import GPT2LMHeadModel, AutoModelForCausalLM
 
 
 def fetch_gpt2_from_huggingface(model="gpt2"):
@@ -8,6 +7,13 @@ def fetch_gpt2_from_huggingface(model="gpt2"):
   openai_state_dict = hf_model.state_dict()
 
   return openai_state_dict
+
+
+def fetch_granite_from_huggingface(model="ibm-granite/granite-3.0-1b-a400m-base"):
+    hf_model = AutoModelForCausalLM.from_pretrained(model)
+    state_dict = hf_model.state_dict()
+    return state_dict
+
 
 
 # This function will update an instance of our GPT2 implementation with parameters
@@ -77,3 +83,61 @@ def load_hf_gpt2_weights(gpt, hf_state_dict):
         block.ffn.layers[2].bias.data.copy_(
             hf_state_dict[f"{p}.mlp.c_proj.bias"]
         )
+
+
+
+
+def load_hf_granite_weights(model, hf_state_dict):
+    n_layers = len(model.trf_blocks)
+
+    # model.embed_tokens.weight torch.Size([49152, 1024])
+    # model.norm.weight torch.Size([1024])
+    # lm_head.weight torch.Size([49152, 1024])
+
+    # Token embeddings
+    model.tok_emb.weight.data.copy_(hf_state_dict["model.embed_tokens.weight"])
+    # Final norm
+    model.final_norm.weight.data.copy_(hf_state_dict["model.norm.weight"])
+    # Out head projection
+    model.out_head.weight.data.copy_(hf_state_dict["lm_head.weight"])
+
+
+
+    # Set parameters for each of the transformer blocks
+    for i in range(n_layers):
+        # model.layers.0.self_attn.q_proj.weight torch.Size([1024, 1024])
+        # model.layers.0.self_attn.k_proj.weight torch.Size([512, 1024])
+        # model.layers.0.self_attn.v_proj.weight torch.Size([512, 1024])
+        # model.layers.0.self_attn.o_proj.weight torch.Size([1024, 1024])
+
+        # model.layers.0.input_layernorm.weight torch.Size([1024])
+        # model.layers.0.post_attention_layernorm.weight torch.Size([1024])
+        # model.layers.0.block_sparse_moe.router.weight torch.Size([32, 1024])
+        # model.layers.0.block_sparse_moe.experts.gate_up_proj torch.Size([32, 1024, 1024])
+        # model.layers.0.block_sparse_moe.experts.down_proj torch.Size([32, 1024, 512])
+
+        block = model.trf_blocks[i]
+        p = f"model.layers.{i}"
+        print(p)
+        # RMS norms
+        block.rmsn1.weight.data.copy_(hf_state_dict[f"{p}.input_layernorm.weight"])
+        block.rmsn2.weight.data.copy_(hf_state_dict[f"{p}.post_attention_layernorm.weight"])
+
+        block.att.W_Q.weight.data.copy_(hf_state_dict[f"{p}.self_attn.q_proj.weight"])
+        block.att.W_K.weight.data.copy_(hf_state_dict[f"{p}.self_attn.k_proj.weight"])
+        block.att.W_V.weight.data.copy_(hf_state_dict[f"{p}.self_attn.v_proj.weight"])
+
+        block.att.out_projection.weight.data.copy_(
+            hf_state_dict[f"{p}.self_attn.o_proj.weight"]
+        )
+
+        # Routing weights
+        block.moe.routing_weights.weight.data.copy_(hf_state_dict[f"{p}.block_sparse_moe.router.weight"])
+        
+        for e, expert in enumerate(block.moe.experts):
+            gate, up = hf_state_dict[f"{p}.block_sparse_moe.experts.gate_up_proj"][e,...].tensor_split(2)
+            down = hf_state_dict[f"{p}.block_sparse_moe.experts.down_proj"][e,...]
+
+            expert.up_W.weight.data.copy_(up)
+            expert.gate_W.weight.data.copy_(gate)
+            expert.down_W.weight.data.copy_(down)
