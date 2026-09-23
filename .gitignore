@@ -19,6 +19,7 @@ wheels/
 notebooks/*.ipynb
 notebooks/spam
 notebooks/instruction
+notebooks/supplemental
 
 # Quarto
 /.quarto/
