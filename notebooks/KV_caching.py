@@ -94,7 +94,7 @@ model_kv = GPTKVCache(GPT_CONFIG_124_openai)
 
 
 # %%
-from sturnus.get_openai_parameters import fetch_gpt2_from_huggingface, load_hf_gpt2_weights
+from sturnus.get_huggingface_parameters import fetch_gpt2_from_huggingface, load_hf_gpt2_weights
 
 openai_state_dict = fetch_gpt2_from_huggingface()
 load_hf_gpt2_weights(model_kv, openai_state_dict)
