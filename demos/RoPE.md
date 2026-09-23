@@ -1,4 +1,4 @@
-# Rotational Position Embedding
+# Rotary Position Embedding
 Chresten R. Søndergaard
 
 ## RoPE position embeddings

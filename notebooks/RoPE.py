@@ -1,6 +1,6 @@
 # %% [markdown]
 # ---
-# title: "Rotational Position Embedding"
+# title: "Rotary Position Embedding"
 # author: "Chresten R. Søndergaard"
 # ---
 
