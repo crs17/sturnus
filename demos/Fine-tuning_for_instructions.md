@@ -1,29 +1,35 @@
-# %% [markdown]
-# # Fine-tuning for Instructions
-#
-# In this notebook we will demonstrate how to fine-tune a local LLM for following instructions. We will go through the following steps:
-# - Load the original OpenAI GPT2 parameters into our local GPT implementation
-# - Verify that the raw foundation model is not very good at following instructions
-# - Fine-tuning the model
-# - Quantify how well the fine-tuned model follows using a seperate LLM as judge
-#
-# This notebook is inspired by chapter seven of [Build A Larger Language Model (from scratch)](https://sebastianraschka.com/llms-from-scratch/) by Sebastian Raschka and I highly recommend the book.
-#
+# Fine-tuning for Instructions
 
-# %% [markdown]
-# ## 1. Prepare the instructions data
-#
-# We will download the [Alpaca Instruction]('https://huggingface.co/datasets/tatsu-lab/alpaca') dataset and select a subset to work with.
 
-# %%
+In this notebook we will demonstrate how to fine-tune a local LLM for
+following instructions. We will go through the following steps: - Load
+the original OpenAI GPT2 parameters into our local GPT implementation -
+Verify that the raw foundation model is not very good at following
+instructions - Fine-tuning the model - Quantify how well the fine-tuned
+model follows using a seperate LLM as judge
+
+This notebook is inspired by chapter seven of [Build A Larger Language
+Model (from scratch)](https://sebastianraschka.com/llms-from-scratch/)
+by Sebastian Raschka and I highly recommend the book.
+
+## 1. Prepare the instructions data
+
+We will download the [Alpaca
+Instruction]('https://huggingface.co/datasets/tatsu-lab/alpaca') dataset
+and select a subset to work with.
+
+``` python
 import dotenv
 import json
 import os
 import requests
 
 dotenv.load_dotenv()
+```
 
-# %%
+    True
+
+``` python
 url = 'https://raw.githubusercontent.com/tatsu-lab/stanford_alpaca/main/alpaca_data.json'
 
 folder = 'instruction'
@@ -38,11 +44,13 @@ if not os.path.isfile(fn):
 
 with open(fn, 'r') as f:
     data_raw = json.load(f)
+```
 
-# %%
+``` python
 sizes = [len(str(entry)) for entry in data_raw]
+```
 
-# %%
+``` python
 import matplotlib.pylab as plt
 
 threshold = 250
@@ -57,29 +65,33 @@ ax.axhline(count_below_threshold, color='k', label=f'Entries with lenght below t
 ax.set_xlabel('Number of characters in entry')
 ax.set_ylabel('Accumulated distribution')
 ax.legend()
+```
 
-# %% [markdown]
-# From the accumulative distribution above we see that the sizes of the instruction inputs vary quite a lot. In order to reduce the amount of compute that we need to do, we will just focus on instructions containing less than 250 characters.
+![](Fine-tuning_for_instructions_files/figure-commonmark/cell-5-output-1.png)
 
-# %%
+From the accumulative distribution above we see that the sizes of the
+instruction inputs vary quite a lot. In order to reduce the amount of
+compute that we need to do, we will just focus on instructions
+containing less than 250 characters.
+
+``` python
 data_filtered = [e for e in data_raw if len(str(e)) < threshold]
+```
 
-# %% [markdown]
-# From these shorter instructions we select 1000 to work on for now:
+From these shorter instructions we select 1000 to work on for now:
 
-# %%
+``` python
 N = 1000
 
 import numpy as np
 
 np.random.seed(42)
 data_sampled = np.random.choice(data_filtered, size=N, replace=False)
+```
 
+Next, we will format to Alpaca instruction prompt format:
 
-# %% [markdown]
-# Next, we will format to Alpaca instruction prompt format:
-
-# %%
+``` python
 def format_instruction(entry):
     instruction_text = (
         f"Below is an instruction that describes a task. "
@@ -93,12 +105,11 @@ def format_instruction(entry):
 
     response_text = f"\n\n### Response:\n{entry['output']}"
     return instruction_text + input_text, response_text
+```
 
+Let’s split the data into train, validation and test sets:
 
-# %% [markdown]
-# Let's split the data into train, validation and test sets:
-
-# %%
+``` python
 split_train = int(len(data_sampled) * .85)
 split_val = int(len(data_sampled) * 0.95)
 
@@ -109,12 +120,16 @@ data_test = data_sampled[split_val:]
 print(f'Train size: {len(data_train)}')
 print(f'Val size:   {len(data_val)}')
 print(f'Test size:  {len(data_test)}')
+```
 
+    Train size: 850
+    Val size:   100
+    Test size:  50
 
-# %% [markdown]
-# Now we are ready to implement the PyTorch Dataset class for holding the instruction data:
+Now we are ready to implement the PyTorch Dataset class for holding the
+instruction data:
 
-# %%
+``` python
 import torch
 from torch.utils.data import Dataset
 import tiktoken
@@ -141,14 +156,23 @@ class InstructionDataset(Dataset):
 dataset_train = InstructionDataset(data_train, tokenizer)
 dataset_val = InstructionDataset(data_val, tokenizer)
 dataset_test = InstructionDataset(data_test, tokenizer)
+```
 
-# %%
+``` python
 print(tokenizer.encode("<|endoftext|>", allowed_special={"<|endoftext|>"}))
+```
 
-# %% [markdown]
-# We will define a collate function for use in the data loaders. This collate function equal length of inputs within each batch by padding with the token id 50,256 correpsonding to the `"<|endoftext|>"` token. For the targets only a single `"<|endoftext|>"` token will be added and the remaing padding will be done with `-100` values so that these positions do not count the [cross-entropy loss function](https://docs.pytorch.org/docs/2.13/generated/torch.nn.CrossEntropyLoss.html).
+    [50256]
 
-# %%
+We will define a collate function for use in the data loaders. This
+collate function equal length of inputs within each batch by padding
+with the token id 50,256 correpsonding to the `"<|endoftext|>"` token.
+For the targets only a single `"<|endoftext|>"` token will be added and
+the remaing padding will be done with `-100` values so that these
+positions do not count the [cross-entropy loss
+function](https://docs.pytorch.org/docs/2.13/generated/torch.nn.CrossEntropyLoss.html).
+
+``` python
 device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
 
 def collate(batch, device=device, pad_token_id=50256, ignore_token_id=-100):
@@ -183,8 +207,16 @@ batch = [
     [8, 9],
 ]
 collate(batch)
+```
 
-# %%
+    (tensor([[    1,     2,     3, 50256, 50256],
+             [    4,     5,     6,     7, 50256],
+             [    8,     9, 50256, 50256, 50256]], device='mps:0'),
+     tensor([[    2,     3, 50256,  -100,  -100],
+             [    5,     6,     7, 50256,  -100],
+             [    9, 50256,  -100,  -100,  -100]], device='mps:0'))
+
+``` python
 from torch.utils.data import DataLoader
 
 num_workers = 0
@@ -218,11 +250,13 @@ dataloader_test = DataLoader(
     drop_last=True,
     collate_fn=collate,
 )
+```
 
-# %% [markdown]
-# Having the data pipeline set up, let us now instantiate our local GPT and load it with open weights from OpenAI. We will use the medium-sized GPT2 with 355 million parameters:
+Having the data pipeline set up, let us now instantiate our local GPT
+and load it with open weights from OpenAI. We will use the medium-sized
+GPT2 with 355 million parameters:
 
-# %%
+``` python
 from sturnus.models import GPTModel
 
 GPT_CONFIG_355_openai = {
@@ -237,24 +271,30 @@ GPT_CONFIG_355_openai = {
 
 
 model = GPTModel(GPT_CONFIG_355_openai)
+```
 
-# %%
+``` python
 from sturnus.get_huggingface_parameters import fetch_gpt2_from_huggingface, load_hf_gpt2_weights
 
 openai_state_dict = fetch_gpt2_from_huggingface(model='gpt2-medium')
 load_hf_gpt2_weights(model, openai_state_dict)
+```
 
-# %%
+    Loading weights:   0%|          | 0/292 [00:00<?, ?it/s]
+
+``` python
 model.eval()
 model.to(device);
+```
 
-# %%
+``` python
 input_text, target_text = format_instruction(data_val[10])
+```
 
-# %% [markdown]
-# We see that the raw foundation model is not great at following instructions:
+We see that the raw foundation model is not great at following
+instructions:
 
-# %%
+``` python
 from sturnus.util import generate, text_to_tokens, tokens_to_text
 
 tokens = generate(
@@ -266,14 +306,37 @@ tokens = generate(
 )
 
 generated_text = tokens_to_text(tokens, tokenizer)
+```
 
-# %%
+``` python
 print(f'INPUT:\n{input_text} \n\n=====\nMODEL RESPONSE:\n{generated_text[len(input_text):]}')
+```
 
-# %% [markdown]
-# The model repeats fracments from the instruction but does not do much more than that. So we need to fine-tune it!
+    INPUT:
+    Below is an instruction that describes a task. Write a response that appropriately completes the request.
 
-# %%
+    ### Instruction:
+    Take a given sentence and change the verb to its past tense.
+
+    ### Input:
+    She buys the chocolate 
+
+    =====
+    MODEL RESPONSE:
+    .
+
+    ### Output:
+
+    She buys the chocolate.
+
+    ### Instruction:
+
+    Take a given sentence and change the verb to its past tense.
+
+The model repeats fracments from the instruction but does not do much
+more than that. So we need to fine-tune it!
+
+``` python
 import time
 import pickle
 
@@ -326,14 +389,15 @@ else:
     
     with open(fn_stats,  'rb') as f:
         stats = pickle.load(f)
+```
 
-
-
-
-# %%
+``` python
 print(stats['execution_time_minutes'])
+```
 
-# %%
+    11.267019466559093
+
+``` python
 import matplotlib.pylab as plt
 
 epochs_tensor = torch.linspace(0, num_epochs, len(stats['train_losses']))
@@ -365,11 +429,14 @@ ax.set_ylabel('Cross entropy loss')
 ax.set_xlabel('Epochs')
 ax2.set_xlabel('Tokens seen')
 ax.legend()
+```
 
-# %% [markdown]
-# After two epochs the validation error seems to have stagnated which indicates that we should not continue the training to avoid overfitting.
+![](Fine-tuning_for_instructions_files/figure-commonmark/cell-22-output-1.png)
 
-# %%
+After two epochs the validation error seems to have stagnated which
+indicates that we should not continue the training to avoid overfitting.
+
+``` python
 tokens = generate(
     model=model.to('cpu'),
     idx=text_to_tokens(input_text, tokenizer),
@@ -379,18 +446,35 @@ tokens = generate(
 )
 
 generated_text_ft = tokens_to_text(tokens, tokenizer)
+```
 
-
-
-# %%
+``` python
 print(f'INPUT:\n{input_text} \n\n=====\nMODEL RESPONSE:\n{generated_text_ft[len(input_text):]}')
+```
 
-# %% [markdown]
-# After the fine-tuning, the model followed the instructions correctly by writing the verb in the past tense.
-#
-# Next, we will query the model for responses for all of the instructions in our datasets:
+    INPUT:
+    Below is an instruction that describes a task. Write a response that appropriately completes the request.
 
-# %%
+    ### Instruction:
+    Take a given sentence and change the verb to its past tense.
+
+    ### Input:
+    She buys the chocolate 
+
+    =====
+    MODEL RESPONSE:
+    .
+
+    ### Response:
+    She bought the chocolate.
+
+After the fine-tuning, the model followed the instructions correctly by
+writing the verb in the past tense.
+
+Next, we will query the model for responses for all of the instructions
+in our datasets:
+
+``` python
 model.to(device)
 torch.manual_seed(123)
 
@@ -448,18 +532,25 @@ def get_responses_for_dataset(dataset, model, fn_cache):
 responses_train = get_responses_for_dataset(data_train, model, 'instruction/responses_train.pkl')
 responses_val = get_responses_for_dataset(data_val, model, 'instruction/responses_val.pkl')
 responses_test = get_responses_for_dataset(data_test, model, 'instruction/responses_test.pkl')
+```
 
+    Training loss: 0.5668795466423034
+    Validation loss: 1.1924409508705138
 
-
-# %%
+``` python
 print(len(responses_train))
 print(len(responses_val))
 print(len(responses_test))
+```
 
-# %% [markdown]
-# Finally, we can employ the LlamaIndex `CorrectnessEvaluator` for assessing the ability of the model to follow instructions:
+    850
+    100
+    50
 
-# %%
+Finally, we can employ the LlamaIndex `CorrectnessEvaluator` for
+assessing the ability of the model to follow instructions:
+
+``` python
 from llama_index.llms.ollama import Ollama
 from llama_index.core.evaluation import CorrectnessEvaluator
 from llama_index.core import PromptTemplate
@@ -550,9 +641,13 @@ import asyncio
 scores_train = asyncio.run(score_responses(data_train, responses_train, 'instruction/scores_train.pkl'))
 scores_val = asyncio.run(score_responses(data_val, responses_val, 'instruction/scores_val.pkl'))
 scores_test = asyncio.run(score_responses(data_test, responses_test, 'instruction/scores_test.pkl'))
+```
 
+    Found 850 scores already calculated
+    Found 100 scores already calculated
+    Found 50 scores already calculated
 
-# %%
+``` python
 scores_train_clean = np.array([s.score for s in scores_train if s.score != -1])
 scores_val_clean = np.array([s.score for s in scores_val if s.score != -1])
 scores_test_clean = np.array([s.score for s in scores_test if s.score != -1])
@@ -588,14 +683,18 @@ plt.ylabel('Normalized cummulative distribution')
 
 
 plt.legend()
+```
 
+![](Fine-tuning_for_instructions_files/figure-commonmark/cell-28-output-1.png)
 
-# %% [markdown]
-# We see that the fine-tuned model does fairly well with an average score of 3.3 on the training set with the validation and test sets having slightly lower average scores, as would be expected.
-#
-# Below are a couple of examples where the model either does a good or a poor job:
+We see that the fine-tuned model does fairly well with an average score
+of 3.3 on the training set with the validation and test sets having
+slightly lower average scores, as would be expected.
 
-# %%
+Below are a couple of examples where the model either does a good or a
+poor job:
+
+``` python
 def print_score(scores, data, index):
     score = scores[index]
     print(score.query)
@@ -608,18 +707,85 @@ def print_score(scores, data, index):
 
 # print_score(scores_test, data_test, 40)
 print_score(scores_train, data_train, 57)
+```
 
-# %%
+    Below is an instruction that describes a task. Write a response that appropriately completes the request.
+
+    ### Instruction:
+    Write a query to find all the items in a database table with a price of $30 or less
+    .
+
+    ### Response:
+    SELECT * FROM Table WHERE price <= 30;
+
+
+
+    Target:   SELECT * FROM Table WHERE price <= 30;
+    Score:    5.0
+    Feedback: The generated answer is identical to the reference answer, which means it is fully correct and relevant to the user query. The answer also accurately completes the request to find all items in the database table with a price of $30 or less. Since the generated answer matches the reference answer exactly, there is no room for improvement.
+
+``` python
 print_score(scores_train, data_train, np.argmin(scores_train_clean))
+```
+
+    Below is an instruction that describes a task. Write a response that appropriately completes the request.
+
+    ### Instruction:
+    Find the rank of the following word in the English language.
+
+    ### Input:
+    snowflake
 
 
-# %%
+    ### Response:
+    The word "snowflake" is the third most common word in the English language.
+
+
+
+    Target:   According to the Oxford English Dictionary, the word "snowflake" is the 12,331st most common word in the English language.
+    Score:    1.0
+    Feedback: The generated answer is completely incorrect and irrelevant to the user query.
+
+``` python
 print_score(scores_test, data_test, np.argmin(scores_test_clean))
+```
 
-# %% [markdown]
-# However, the Llama3 model used for scoring also has its limitations as seen below where it grades a clearly wrong response with highest grade:
+    Below is an instruction that describes a task. Write a response that appropriately completes the request.
 
-# %%
+    ### Instruction:
+    Given the matrix as A = [2 -3; 5 6], find the determinant
+    .
+
+    ### Input:
+    A = [2 -3; 5 6],
+
+    ### Response:
+    The determinant of A is [2 -3; 5 6].
+
+
+
+    Target:   The determinant of matrix A is 24.
+    Score:    1.0
+    Feedback: The generated answer does not even attempt to find the determinant of the given matrix, which makes it completely irrelevant to the user query.
+
+However, the Llama3 model used for scoring also has its limitations as
+seen below where it grades a clearly wrong response with highest grade:
+
+``` python
 print_score(scores_test, data_test, np.argmax(scores_test_clean))
+```
 
-# %%
+    Below is an instruction that describes a task. Write a response that appropriately completes the request.
+
+    ### Instruction:
+    Generate a modern version of the phrase "a watched pot never boils".
+
+
+    ### Response:
+    A watched pot never boils.
+
+
+
+    Target:   A watched phone never charges.
+    Score:    5.0
+    Feedback: The generated answer is identical to the reference answer, which means it accurately completes the request and provides a modern version of the phrase "a watched pot never boils". The answer is also relevant to the instruction, as it updates the original phrase to fit a contemporary context. Therefore, I give it a score of 5.
