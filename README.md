@@ -1,6 +1,16 @@
 # Sturnus
-This project is my implementation from scratch of a *Generative Pretrained Transformer* (GPT). 
+This repository is where I store my personal investigation into all aspects of *Generative Pretrained Transformers* (GPT). I find that I learn best by implementing things myself from scratch and I try to make a demo on each topic covered.
 
+## Topics
+
+- [Implementation of a GPT model from scratch.](https://github.com/crs17/sturnus/blob/main/demos/HCA-GPT.md)
+- [Fine-tuning for classification](https://github.com/crs17/sturnus/blob/main/demos/Fine-tuning_for_classification.md)
+- [Fine-tuning for instructions](https://github.com/crs17/sturnus/blob/main/demos/Fine-tuning_for_instructions.md)
+- [Low-rank adaptation fine-tuning](https://github.com/crs17/sturnus/blob/main/demos/LoRA.md)
+- [KV-caching](https://github.com/crs17/sturnus/blob/main/demos/KV_caching.md)
+- [Grouped-Query Attention](https://github.com/crs17/sturnus/blob/main/demos/Grouped-query_attention.md)
+- [Rotary Position Embedding](https://github.com/crs17/sturnus/blob/main/demos/RoPE.md)
+- [Mixture of Experts](https://github.com/crs17/sturnus/blob/main/demos/MoE.md)
 
 
 ## Name
