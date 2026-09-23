@@ -56,7 +56,7 @@ class LinearWithLoRA(torch.nn.Module):
 # As usual we will instantiate our implementation of GPT2 and load the OpenAI weights from Hugging Face:
 
 # %%
-from sturnus.model import GPTModel
+from sturnus.models import GPTModel
 
 GPT_CONFIG_124_openai = {
     'vocab_size': 50257,
@@ -71,7 +71,7 @@ GPT_CONFIG_124_openai = {
 model = GPTModel(GPT_CONFIG_124_openai)
 
 # %%
-from sturnus.get_openai_parameters import fetch_gpt2_from_huggingface, load_hf_gpt2_weights
+from sturnus.get_huggingface_parameters import fetch_gpt2_from_huggingface, load_hf_gpt2_weights
 
 openai_state_dict = fetch_gpt2_from_huggingface()
 load_hf_gpt2_weights(model, openai_state_dict)
