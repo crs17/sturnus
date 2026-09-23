@@ -85,8 +85,8 @@ def text_to_tokens(text, tokenizer):
     encoded_tensor = torch.tensor(encoded).unsqueeze(0)
     return encoded_tensor
 
-def tokens_to_text(tokens, tokenizer):
-    return tokenizer.decode(tokens.squeeze(0).tolist())
+def tokens_to_text(tokens, tokenizer, **kwargs):
+    return tokenizer.decode(tokens.squeeze(0).tolist(), **kwargs)
 
 
 def calc_loss_batch(input_batch, target_batch, model, device):
@@ -163,15 +163,15 @@ def train_model_simple(
     return train_losses, val_losses, track_tokens_seen
 
 
-def generate_and_print_sample(model, tokenizer, device, start_context):
+def generate_and_print_sample(model, tokenizer, device, start_context, context_size=None, decoder_kwargs={}):
     model.eval()
-    context_size = model.pos_emb.weight.shape[0]
+    context_size = context_size or model.pos_emb.weight.shape[0]
     encoded = text_to_tokens(start_context, tokenizer).to(device)
     with torch.no_grad():
         token_ids = generate_text_simple(
             model=model, idx=encoded, max_new_tokens=50, context_size=context_size
         )
-    decoded_text = tokens_to_text(token_ids, tokenizer)
+    decoded_text = tokens_to_text(token_ids, tokenizer, **decoder_kwargs)
     print(decoded_text.replace('\n', ' '))
     model.train()
 

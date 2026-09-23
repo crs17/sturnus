@@ -15,201 +15,164 @@
 #
 # $$G(x) = \text{softmax}(\text{topK}(x \cdot W_g))$$
 #
-# In the Shazeer paper linked above, a noise terms was also added in the gating function to introduce some randomness in the selection projects. This is done to enable better load-balancing between the experts. However, later implementations such as the [Switch Transformers](https://arxiv.org/abs/2101.03961) and [GLaM](https://arxiv.org/abs/2112.06905) have abandonded the noise term again. Instead, an auxillary loss term is added to ensure load-balancing.
+# In the Shazeer paper linked above, a noise term was also added in the gating function to introduce some randomness in the selection process. This is done to enable better load-balancing between the experts. However, later implementations such as the [Switch Transformers](https://arxiv.org/abs/2101.03961) and [GLaM](https://arxiv.org/abs/2112.06905) have abandoned the noise term again. Instead, an auxiliary loss term is added to ensure load-balancing.
 #
 #
 # Expert capacity can be defined as:
 #
 # $$ E = \frac{k \cdot B \cdot C}{ N} \alpha $$
 #
-# where $k$ is the number of active experts, $B$ is the batch size, $C$ is the context length, $N$ is the total number of experts and $\alpha$ is the capacity factor. A capacity factor of 1 enforces equal distribution of the tokens but if the router decides to send a larger proportion of the tokens in a batch to a specific expert, those additional tokens are dropped by the epxert (however they are still passed on via the shortcut connection of the transformer block). Setting a larger capacity factor reduces the amount of droppped tokens at a efficiency loss due to less uniform distribution among the experts.
+# where $k$ is the number of active experts, $B$ is the batch size, $C$ is the context length, $N$ is the total number of experts and $\alpha$ is the capacity factor. A capacity factor of 1 enforces equal distribution of the tokens but if the router decides to send a larger proportion of the tokens in a batch to a specific expert, those additional tokens are dropped by the expert (however they are still passed on via the shortcut connection of the transformer block). Setting a larger capacity factor reduces the amount of dropped tokens at an efficiency loss due to less uniform distribution among the experts.
 #
+# An un-optimised version of MoE was implemented [here](https://github.com/crs17/sturnus/blob/main/src/sturnus/models/granite.py). Expert capacity was not implemented this time around as the model we will test against (see below) employs a dropless MoE approach.
 #
 
 # %% [markdown]
-# We intend re-implement [`OLMoE-1B-7B`](https://huggingface.co/allenai/OLMoE-1B-7B-0125). With quantization this model is small enough that we can download the open weight and run it locally to verify that the implementation works.
-
-# %% [markdown]
+# The smallest open-weight MoE model I could find is IBM's `Granite-3.0-1B-A400M`. So the goal is to re-implement this model so that we can download the open weights for testing the MoE implementation. However, the `Granite-3.0-1B-A400M` model has a few additional changes relative to our GPT2 implementation besides the Mixture of Experts - so we need to implement these as well.
 #
+# ## Changes needed to implement Granite when starting from GPT2
+#
+# ### Rotary position embeddings instead of learned absolute position embeddings
+# Rotary position embeddings employs a clever scheme of rotations that allows for the relative positions of tokens taken into account in the attention blocks. This [demo](https://github.com/crs17/sturnus/blob/main/demos/RoPE.md) visualizes the rotations and resulting attention scores calculated using my [implementation](https://github.com/crs17/sturnus/blob/main/src/sturnus/models/rope.py).
+# The Granite model does, however, not implement the original RoPE embeddings where rotation is applied to 2D vectors along the embedding dimension. Instead the Granite model uses llama-style RoPE where the 2D vectors are constructed by pairing $x_i$ with $x_{i+P/2}$.
 
 # %%
 import torch
-from sturnus.models.gpt2 import FeedForward, MultiHeadAttention, LayerNorm, GPTModel
 
+from sturnus.models.rope import calculate_thetas, apply_rope, apply_rope_half
 
-# In order to keep track of the dimensions of each array, 
-# we use the following one-letter abbreviations:
-# I   self attention block input size
-# O   self attention block output size
-# B   batch size
-# C   context length
-# H   Head count
-# P   output size per head
-# E   Number of total experts in layer
-# K   Number of expers to use for each token
+B = 2
+C = 100
+H = 5
+P = 1024
 
+c_values, thetas = calculate_thetas(embedding_dimension=P, context_size=C)
 
-class NaiveMixtureOfExpertsLayer(torch.nn.Module):
-    def __init__(self, config: dict) -> None:
-        super().__init__()
+x = torch.rand(B, C, H, P)  # [B, C, H, P]
 
-        count_experts = config['count_experts']
-        self.count_experts_used = config['count_experts_used']
-
-        self.routing_weights = torch.nn.Linear(config['embed_dim'], count_experts, bias=False)
-
-        self.experts = torch.nn.ModuleList(
-            [FeedForward(config) for _ in range(count_experts)]
-        )
-    
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Project the inputs into the dimension of the number of experts. This way we will get 
-        # one value for each token and each expert
-        logits = self.routing_weights.forward(x)  # [B, C, E]
-
-        # Convert the logits to probabilities using softmax
-        probabilities = torch.nn.functional.softmax(logits, dim=-1)  # [B, C, E]
-
-        # We now select the top <count_experts_used> experts for each token
-        expert_weights, expert_indices = torch.topk(
-            probabilities, self.count_experts_used
-        )  # [B, C, K]
-
-        # Normalize the weights of the selected experts
-        expert_weights /= expert_weights.sum(keepdim=True, dim=-1)  # [B, C, K]
-
-        # Instantiate the y tensor with zeros - we will sum the outputs from each expert 
-        # in this tensor
-        y = torch.zeros_like(x)  # B, C, I
-
-        for i, expert in enumerate(self.experts):
-            # Make a mask for the current expert over the tokens
-            mask = (expert_indices == i)  # [B, C, K]
-
-            # Use the mask to filter out the tokens in the current batch that are to 
-            # be processed by the current expert
-            tokens_for_expert = x[mask.any(dim=-1)]  # [?, I]
-          
-            # Pass the selected token through the current expert
-            output = expert.forward(tokens_for_expert)  # [?, I]
-
-            # Find the indices of the processed tokens in the original input tensor 
-            # so that we can fill them in correctly in the output tensor
-            indices_of_tokens_for_expert = torch.nonzero(mask)  # [?, 3]
-
-            # Go through each of the processed tokens, look up the corresponding expert weight
-            # for that token and add the scaled contribution to the output tensor  
-            for index, vector in zip(indices_of_tokens_for_expert, output):
-                weight = expert_weights[index[0]][index[1]][index[2]]
-                y[index[0]][index[1]] += weight * vector  # [I]
-            
-        return y
-
-
-class NaiveMoETransformerBlock(torch.nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        self.att = MultiHeadAttention(
-            d_in=config['embed_dim'],
-            d_out=config['embed_dim'],
-            context_length=config['block_size'],
-            head_count=config['count_heads'],
-            dropout_rate=config['dropout'],
-            qkv_bias=config['qkv_bias']
-        )
-        self.ln1 = LayerNorm(config['embed_dim'])
-        # self.ffn = FeedForward(config)
-        self.moe = NaiveMixtureOfExpertsLayer(config)
-
-        self.ln2 = LayerNorm(config['embed_dim'])
-        self.dropout = torch.nn.Dropout(config['dropout'])
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Attention block
-        # Identifies and analyses relationships between tokens
-        shortcut = x
-        x = self.ln1(x)
-        x = self.att(x)
-        x = self.dropout(x)
-        x = x + shortcut
-
-        # Feed-forward block
-        # Modifies tokens individually - no information is shared between tokens
-        shortcut = x
-        x = self.ln2(x)
-        # x = self.ffn(x)
-        x = self.moe(x)
-    
-        x = self.dropout(x)
-        x = x + shortcut
-
-        return x
-
-class NaiveMOEGPTModel(torch.nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        self.tok_emb = torch.nn.Embedding(config['vocab_size'], config['embed_dim'])
-        self.pos_emb = torch.nn.Embedding(config['block_size'], config['embed_dim'])
-
-        self.drop_emb = torch.nn.Dropout(config['dropout'])
-
-        self.trf_blocks = torch.nn.Sequential(
-            *[NaiveMoETransformerBlock(config) for _ in range(config['count_blocks'])]
-        )
-
-        self.final_norm = LayerNorm(config['embed_dim'])
-        self.out_head = torch.nn.Linear(
-            config['embed_dim'], config['vocab_size'], bias=False
-        )
-        
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        batch_size, seq_len = x.shape
-        tok_embeds = self.tok_emb(x)
-
-        pos_embeds = self.pos_emb(torch.arange(seq_len, device=x.device))
-
-        x = tok_embeds + pos_embeds
-        x = self.drop_emb(x)
-        x = self.trf_blocks(x)
-        x = self.final_norm(x)
-        logits = self.out_head(x)
-
-        return logits
-
-
+x_ = apply_rope(x, c_values)
+x_half = apply_rope_half(x, c_values)
 
 # %%
-GPT_MOE_CONFIG = {
-    'vocab_size': 50257,
-    'block_size': 1024,
-    'count_heads': 12,
-    'count_blocks': 12,
-    # 'embed_dim': 768,
-    'embed_dim': 24,
-    'dropout': 0.1,
-    'qkv_bias': True, # Used in GPT2 but typically not in modern LLMs as the biases do not improve performance
-    'count_experts': 4,
-    'count_experts_used': 2,
-}
+import matplotlib.pyplot as plt
 
+fig, ax = plt.subplots()
 
-torch.manual_seed(42)
+d_values = x[0, 1, 0, :]- x_[0, 1, 0, :]
+d_half_values = x[0, 1, 0, :]- x_half[0, 1, 0, :]
 
-MoEGPT = NaiveMOEGPTModel(GPT_MOE_CONFIG)
+ax.plot(range(P), d_values, label='Original RoPE')
+ax.plot(range(P), d_half_values, label='Llama-style RoPE')
 
-import tiktoken
-from sturnus.util import generate_and_print_sample
-
-tokenizer = tiktoken.get_encoding("gpt2")
-device='cpu'
-start_context = 'Hello, world'
-
-generate_and_print_sample(MoEGPT, tokenizer, device, start_context)
+ax.set_xlabel('Position')
+ax.set_ylabel('Difference in embedding space after RoPE')
+ax.set_title('Difference between original and Llama-style RoPE')
+ax.legend();
 
 # %% [markdown]
-# The samllest open-weight MoE model I could find is IBM's `Granite-3.0-1B-A400M`. So the goal is to re-implement this model so that we can download the open weights for testing the MoE implementation. However, the `Granite-3.0-1B-A400M` model has a few additional changes relative to out GPT2 implementation besides the Mixture of Experts - so we need to implement these as well:
-# - RoPE position embeddings instead of learned absolute position embeddings
-# - RMSNorm instead of LayerNorm
-# - SwiGLU instead of GELU activation
-# - Grouped-query Attention instead of Multi-head Attention
-# - Some scalar multipliers
+# Above we see the resulting differences in embedding values after application of the two RoPE styles. Whereas the original RoPE mainly rotates the first embedding dimensions, llama-style RoPE rotates the first dimensions as well as the first part of the second half of the dimension.
+#
+# ### Grouped-query Attention instead of Multi-head Attention
+# Grouped-query attention ([demo](https://github.com/crs17/sturnus/blob/main/demos/Grouped-query_attention.md) and [implementation](https://github.com/crs17/sturnus/blob/main/src/sturnus/models/gqa.py)) optimises required compute and memory by sharing key and value head between grouped query heads. I implemented a Group-query attention block with RoPE as part of the [Granite](https://github.com/crs17/sturnus/blob/main/src/sturnus/models/granite.py) implementation.
+#
+# ### RMSNorm instead of LayerNorm
+# RMSNorm is implemented as part of the [Granite](https://github.com/crs17/sturnus/blob/main/src/sturnus/models/granite.py) model.
+#
+#
+# ### SwiGLU instead of GELU activation
+# The [Granite](https://github.com/crs17/sturnus/blob/main/src/sturnus/models/granite.py) model implements [SwiGLU](https://arxiv.org/pdf/2002.05202) which is a combination of the swish activation function, $\text{Swish}(x) = x \cdot \text{sigmoid}(\beta x)$, and a gated linear unit so that:
+#
+# $$\text{SwiGLU}(x) =  W_2(\text{Swish}(xW) \odot xV)$$
+#
+#
+# ### Some scalar multipliers
+# Four different scalar multipliers was added at different places in the model to ensure consistency with the official Granite model. These include:
+# - An attention multiplier of $1/64$. As the per-head embedding dimension is 64 this corresponds to [muP scaling](https://arxiv.org/abs/2203.03466) rather than the usual $\sqrt(P)$ scaling
+# - An embedding multiplier of 12.0
+# - A logits scaling factor of 6.0
+# - A residual multiplier of 0.22
+#
+# ## Instantiate Granite Model
+# After implementing the above changes, we are ready to instantiate the Granite model:
+
+# %%
+from sturnus.models.granite import GraniteModel
+
+# Config from
+# https://huggingface.co/ibm-granite/granite-3.0-1b-a400m-base/blob/main/config.json
+
+GRANITE_CONFIG = {
+    'embed_dim': 1024,
+    'count_blocks': 24,
+
+    'block_size': 4096,
+    'count_query_heads': 16,
+    'count_kv_heads': 8,
+
+    'count_experts': 32,
+    'count_experts_used': 8,
+    'mlp_hidden_size': 512,
+
+    'vocab_size': 49152,
+    'dropout': 0.0,
+    'qkv_bias': False,
+
+    'rope_theta': 10000,
+
+    'attention_multiplier': 0.015625,
+    'embedding_multiplier': 12.0,
+    'logits_scaling': 6.0,
+    'residual_multiplier': 0.22,
+    'rms_norm_eps': 1e-06,
+}
+
+granite = GraniteModel(GRANITE_CONFIG)
+
+# %% [markdown]
+# Next, we will fetch the Granite weights from HuggingFace and load them into our model:
+
+# %%
+from sturnus.get_huggingface_parameters import fetch_granite_from_huggingface, load_hf_granite_weights
+
+granite_state_dict = fetch_granite_from_huggingface()
+load_hf_granite_weights(granite, granite_state_dict)
+
+# %%
+from transformers import AutoTokenizer
+from sturnus.util import text_to_tokens, generate_and_print_sample
+
+
+tokenizer = AutoTokenizer.from_pretrained("ibm-granite/granite-3.0-1b-a400m-base")
+
+device='cpu'
+start_context = 'The block of granite which was an obstacle in the pathway of the weak, became a stepping-stone in the pathway of the strong. -Thomas Carlyle'
+
+granite.eval()
+
+generate_and_print_sample(granite, tokenizer, device, start_context, context_size=GRANITE_CONFIG['block_size'], decoder_kwargs={'clean_up_tokenization_spaces': False})
+
+# %% [markdown]
+# We see that the model produces at least grammatically meaningful English, which is a good indication that implementation is correct.
+#
+# To be certain, we will compare the output logits of our implementation with those of the official Granite to check if they match:
+
+# %%
+from transformers import AutoModelForCausalLM
+
+hf_model = AutoModelForCausalLM.from_pretrained("ibm-granite/granite-3.0-1b-a400m-base")
+
+hf_model.eval()
+granite.eval()
+
+input_ids = text_to_tokens(start_context, tokenizer)
+batched_input_ids = input_ids.repeat(2, 1)
+
+with torch.no_grad():
+    hf_logits = hf_model(batched_input_ids).logits
+    granite_logits = granite(batched_input_ids)
+
+print((hf_logits - granite_logits).abs().max())
+print(torch.allclose(hf_logits, granite_logits, atol=1e-3))
+
+# %% [markdown]
+# The logits are identical within an acceptable tolerance. So that means that our implementations of MoE, RoPE and GQA are correct :-) 

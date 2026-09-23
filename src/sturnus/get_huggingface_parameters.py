@@ -118,7 +118,7 @@ def load_hf_granite_weights(model, hf_state_dict):
 
         block = model.trf_blocks[i]
         p = f"model.layers.{i}"
-        print(p)
+
         # RMS norms
         block.rmsn1.weight.data.copy_(hf_state_dict[f"{p}.input_layernorm.weight"])
         block.rmsn2.weight.data.copy_(hf_state_dict[f"{p}.post_attention_layernorm.weight"])

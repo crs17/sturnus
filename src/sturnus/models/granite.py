@@ -41,7 +41,7 @@ class RMSNorm(torch.nn.Module):
         super().__init__()
         self.eps = eps
         self.emb_dim = emb_dim
-        self.weight = torch.nn.Parameter(torch.ones(emb_dim)).float()
+        self.weight = torch.nn.Parameter(torch.ones(emb_dim).float())
 
     def forward(self, x):
         means = x.pow(2).mean(dim=-1, keepdim=True)
@@ -64,6 +64,7 @@ class GroupQueryAttentionWithRoPE(torch.nn.Module):
         kv_head_count: int,
         dropout_rate: float,
         attention_multiplier: float,
+        theta_zero: int,
         qkv_bias: bool = False
     ):
         super().__init__()
@@ -99,7 +100,11 @@ class GroupQueryAttentionWithRoPE(torch.nn.Module):
         self.dropout = torch.nn.Dropout(dropout_rate)
 
         # Pre-calculate thetas for Rotational Position Embeddings
-        c_values, _ = calculate_thetas(embedding_dimension=self.d_out_per_head, context_size=context_length)
+        c_values, _ = calculate_thetas(
+            embedding_dimension=self.d_out_per_head,
+            context_size=context_length,
+            theta_zero=theta_zero
+        )
         self.register_buffer('c_values', c_values)
 
         # We also register the mask buffer. This is a triangular matrix of ones
@@ -166,8 +171,7 @@ class GroupQueryAttentionWithRoPE(torch.nn.Module):
         attention_scores = attention_scores.masked_fill(mask, float('-inf'))
 
         # Next we apply the softmax function to the attention scores. This
-        # normalizes the scores to a sum of 1. The division by the
-        # square root of the output size per head helps with numerical stability.
+        # normalizes the scores to a sum of 1.
         attention_weights = torch.softmax(attention_scores, dim=-1)
         # Finally we apply the dropout layer to the attention weights.
         attention_weights = self.dropout(attention_weights)
@@ -258,6 +262,7 @@ class GraniteTransformerBlock(torch.nn.Module):
             kv_head_count=config['count_kv_heads'],
             dropout_rate=config['dropout'],
             attention_multiplier=config['attention_multiplier'],
+            theta_zero=config['rope_theta'],
             qkv_bias=config['qkv_bias']
         )
         self.residual_multiplier = config['residual_multiplier']
