@@ -33,7 +33,7 @@
 # ## Changes needed to implement Granite when starting from GPT2
 #
 # ### Rotary position embeddings instead of learned absolute position embeddings
-# Rotary position embeddings employs a clever scheme of rotations that allows for the relative positions of tokens taken into account in the attention blocks. This [demo](https://github.com/crs17/sturnus/blob/main/demos/RoPE.md) visualizes the rotations and resulting attention scores calculated using my [implementation](https://github.com/crs17/sturnus/blob/main/src/sturnus/models/rope.py).
+# Rotary position embeddings employ a clever scheme of rotations that allows for the relative positions of tokens to be taken into account in the attention blocks. This [demo](https://github.com/crs17/sturnus/blob/main/demos/RoPE.md) visualizes the rotations and resulting attention scores calculated using my [implementation](https://github.com/crs17/sturnus/blob/main/src/sturnus/models/rope.py).
 # The Granite model does, however, not implement the original RoPE embeddings where rotation is applied to 2D vectors along the embedding dimension. Instead the Granite model uses llama-style RoPE where the 2D vectors are constructed by pairing $x_i$ with $x_{i+P/2}$.
 
 # %%
@@ -73,7 +73,7 @@ ax.legend();
 # Above we see the resulting differences in embedding values after application of the two RoPE styles. Whereas the original RoPE mainly rotates the first embedding dimensions, llama-style RoPE rotates the first dimensions as well as the first part of the second half of the dimension.
 #
 # ### Grouped-query Attention instead of Multi-head Attention
-# Grouped-query attention ([demo](https://github.com/crs17/sturnus/blob/main/demos/Grouped-query_attention.md) and [implementation](https://github.com/crs17/sturnus/blob/main/src/sturnus/models/gqa.py)) optimises required compute and memory by sharing key and value head between grouped query heads. I implemented a Group-query attention block with RoPE as part of the [Granite](https://github.com/crs17/sturnus/blob/main/src/sturnus/models/granite.py) implementation.
+# Grouped-query attention ([demo](https://github.com/crs17/sturnus/blob/main/demos/Grouped-query_attention.md) and [implementation](https://github.com/crs17/sturnus/blob/main/src/sturnus/models/gqa.py)) optimises required compute and memory by sharing key and value head between grouped query heads. I implemented a Grouped-query attention block with RoPE as part of the [Granite](https://github.com/crs17/sturnus/blob/main/src/sturnus/models/granite.py) implementation.
 #
 # ### RMSNorm instead of LayerNorm
 # RMSNorm is implemented as part of the [Granite](https://github.com/crs17/sturnus/blob/main/src/sturnus/models/granite.py) model.
@@ -86,8 +86,9 @@ ax.legend();
 #
 #
 # ### Some scalar multipliers
-# Four different scalar multipliers was added at different places in the model to ensure consistency with the official Granite model. These include:
-# - An attention multiplier of $1/64$. As the per-head embedding dimension is 64 this corresponds to [muP scaling](https://arxiv.org/abs/2203.03466) rather than the usual $\sqrt(P)$ scaling
+# Four different scalar multipliers were added at different places in the model to ensure consistency with the official Granite model. These include:
+#
+# - An attention multiplier of $1/64$. As the per-head embedding dimension is 64 this corresponds to [muP scaling](https://arxiv.org/abs/2203.03466) rather than the usual $1/\sqrt{P}$ scaling
 # - An embedding multiplier of 12.0
 # - A logits scaling factor of 6.0
 # - A residual multiplier of 0.22
@@ -165,7 +166,11 @@ hf_model.eval()
 granite.eval()
 
 input_ids = text_to_tokens(start_context, tokenizer)
-batched_input_ids = input_ids.repeat(2, 1)
+
+input_ids_a = text_to_tokens(start_context, tokenizer)
+input_ids_b = text_to_tokens("Some other sentence about rocks and mountains ...", tokenizer)
+n = min(input_ids_a.shape[1], input_ids_b.shape[1])
+batched_input_ids = torch.cat([input_ids_a[:, :n], input_ids_b[:, :n]])
 
 with torch.no_grad():
     hf_logits = hf_model(batched_input_ids).logits

@@ -64,9 +64,9 @@ Mixture of Experts - so we need to implement these as well.
 
 ### Rotary position embeddings instead of learned absolute position embeddings
 
-Rotary position embeddings employs a clever scheme of rotations that
-allows for the relative positions of tokens taken into account in the
-attention blocks. This
+Rotary position embeddings employ a clever scheme of rotations that
+allows for the relative positions of tokens to be taken into account in
+the attention blocks. This
 [demo](https://github.com/crs17/sturnus/blob/main/demos/RoPE.md)
 visualizes the rotations and resulting attention scores calculated using
 my
@@ -126,8 +126,8 @@ Grouped-query attention
 and
 [implementation](https://github.com/crs17/sturnus/blob/main/src/sturnus/models/gqa.py))
 optimises required compute and memory by sharing key and value head
-between grouped query heads. I implemented a Group-query attention block
-with RoPE as part of the
+between grouped query heads. I implemented a Grouped-query attention
+block with RoPE as part of the
 [Granite](https://github.com/crs17/sturnus/blob/main/src/sturnus/models/granite.py)
 implementation.
 
@@ -150,13 +150,17 @@ $$\text{SwiGLU}(x) =  W_2(\text{Swish}(xW) \odot xV)$$
 
 ### Some scalar multipliers
 
-Four different scalar multipliers was added at different places in the
+Four different scalar multipliers were added at different places in the
 model to ensure consistency with the official Granite model. These
-include: - An attention multiplier of $1/64$. As the per-head embedding
-dimension is 64 this corresponds to [muP
-scaling](https://arxiv.org/abs/2203.03466) rather than the usual
-$\sqrt(P)$ scaling - An embedding multiplier of 12.0 - A logits scaling
-factor of 6.0 - A residual multiplier of 0.22
+include:
+
+- An attention multiplier of $1/64$. As the per-head embedding dimension
+  is 64 this corresponds to [muP
+  scaling](https://arxiv.org/abs/2203.03466) rather than the usual
+  $1/\sqrt{P}$ scaling
+- An embedding multiplier of 12.0
+- A logits scaling factor of 6.0
+- A residual multiplier of 0.22
 
 ## Instantiate Granite Model
 
@@ -243,7 +247,11 @@ hf_model.eval()
 granite.eval()
 
 input_ids = text_to_tokens(start_context, tokenizer)
-batched_input_ids = input_ids.repeat(2, 1)
+
+input_ids_a = text_to_tokens(start_context, tokenizer)
+input_ids_b = text_to_tokens("Some other sentence about rocks and mountains ...", tokenizer)
+n = min(input_ids_a.shape[1], input_ids_b.shape[1])
+batched_input_ids = torch.cat([input_ids_a[:, :n], input_ids_b[:, :n]])
 
 with torch.no_grad():
     hf_logits = hf_model(batched_input_ids).logits
@@ -255,7 +263,7 @@ print(torch.allclose(hf_logits, granite_logits, atol=1e-3))
 
     Loading weights:   0%|          | 0/219 [00:00<?, ?it/s]
 
-    tensor(4.1008e-05)
+    tensor(3.5286e-05)
     True
 
 The logits are identical within an acceptable tolerance. So that means
